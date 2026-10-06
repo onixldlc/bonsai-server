@@ -28,7 +28,8 @@ Links: [weights on HuggingFace](https://huggingface.co/prism-ml/Ternary-Bonsai-2
 docker/        Dockerfile + entrypoint.sh + verify.sh — shared, identical for both stacks
 gpu/           compose.yaml + .env  — CUDA build, RTX 3060
 cpu/           compose.yaml + .env  — CPU-only build, for a VPS
-.github/       workflow that builds both variants and publishes them on a v* tag
+VERSION        the release number; changing it is what triggers a publish
+.github/       workflow that builds both variants and pushes them to GHCR
 ```
 
 The Dockerfile takes `BASE_IMAGE` and `PRISM_FLAVOR` build args, so the same file produces
@@ -72,17 +73,27 @@ The compose stacks build locally on purpose (`image: localhost/bonsai2-server:..
 ## CI
 
 [`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds both variants in a
-matrix off the one Dockerfile. Every push and PR builds them as a compile check and pushes
-nothing; publishing happens when a `v*` git tag is pushed:
+matrix off the one Dockerfile and pushes them to GHCR.
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0     # -> :v0.1.0-gpu, :v0.1.0-cpu, and moves :gpu / :cpu
+**The `VERSION` file is the trigger.** The workflow runs only on a push to `main` that
+changes that file — any other commit costs zero Actions minutes. So a release is one edit,
+made from anywhere: the GitHub web editor, github.dev, a phone. No git tag, no local clone,
+no credentialed machine.
+
+```
+VERSION: 0.1.0 -> 0.2.0        commit to main
+  => ghcr.io/onixldlc/bonsai-server:v0.2.0-gpu   (pinned)
+     ghcr.io/onixldlc/bonsai-server:v0.2.0-cpu   (pinned)
+     ghcr.io/onixldlc/bonsai-server:gpu          (moved to this build)
+     ghcr.io/onixldlc/bonsai-server:cpu          (moved to this build)
 ```
 
+The file holds the bare number (`0.2.0`); the workflow adds the `v`. Pushing the same
+VERSION twice republishes over those tags, so bump it to keep a pinned build.
+
 No registry secrets to set up — it logs in with the built-in `GITHUB_TOKEN`. Actions tab →
-*image* → **Run workflow** does a manual run, with a `version` override and a `publish`
-checkbox if you want to push without tagging.
+*image* → **Run workflow** forces a run without touching the file, with an optional
+`version` override.
 
 ## Pick the quant
 
