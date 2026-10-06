@@ -1,0 +1,39 @@
+services:
+  bonsai2:
+    image: localhost/bonsai2-server:prism-b10754-cpu
+    build:
+      # Context is the repo root so both stacks share docker/.
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # Plain ubuntu + the CPU release asset: no CUDA base, no GPU runtime.
+        BASE_IMAGE: docker.io/library/ubuntu:24.04
+        PRISM_FLAVOR: ubuntu-x64
+    container_name: bonsai2-cpu
+    ports:
+      - "8080:8080"
+    volumes:
+      - bonsai2-models:/models
+    # Compose auto-reads ./.env only to expand ${VAR} inside this file.
+    # Putting those vars INSIDE the container needs this line.
+    env_file:
+      - .env
+    # CFS quota, not a core count: 3.0 = three cores' worth of CPU time per
+    # period = 50% of a 6 vCPU box. Set CPU_LIMIT in .env.
+    cpus: ${CPU_LIMIT}
+    # Relative weight when the host is contended (1024 = normal). Halving it
+    # means other processes win the tie-break without changing the hard cap.
+    cpu_shares: 512
+    # Hard core pinning instead of a time share, if you prefer:
+    # cpuset: "0-2"
+    mem_limit: ${MEM_LIMIT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20m
+
+volumes:
+  bonsai2-models:
