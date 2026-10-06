@@ -25,24 +25,35 @@ Links: [weights on HuggingFace](https://huggingface.co/prism-ml/Ternary-Bonsai-2
 ## Layout
 
 ```
-docker/        Dockerfile + entrypoint.sh + verify.sh — shared, identical for both stacks
-gpu/           compose.yaml + .env  — CUDA build, RTX 3060
-cpu/           compose.yaml + .env  — CPU-only build, for a VPS
+docker/        Dockerfile + entrypoint.sh + verify.sh + mcp-web.sh — shared by both stacks
+gpu/           compose.yaml + compose-dev.yaml + .env  — CUDA, RTX 3060
+cpu/           compose.yaml + compose-dev.yaml + .env  — CPU-only, for a VPS
 VERSION        the release number; changing it is what triggers a publish
 .github/       workflow that builds both variants and pushes them to GHCR
 ```
 
-The Dockerfile takes `BASE_IMAGE` and `PRISM_FLAVOR` build args, so the same file produces
-the CUDA image (`nvidia/cuda` base, 207 MB release asset) and the CPU image
-(`ubuntu:24.04` base, 17.8 MB asset). Each stack's compose sets its own args; everything
-that actually differs lives in that stack's `.env`.
-
-Run a stack from inside its folder:
+`compose.yaml` pulls the published image — `:gpu` or `:cpu` — so a plain `up` downloads a
+build instead of making one:
 
 ```bash
-cd gpu && podman compose up -d --build     # 3060
-cd cpu && podman compose up -d --build     # VPS
+cd gpu && podman compose up -d     # 3060
+cd cpu && podman compose up -d     # VPS
 ```
+
+`compose-dev.yaml` is the override that builds from this checkout instead. Use it whenever
+you are changing anything under `docker/`, since a published tag cannot contain edits you
+have not released yet:
+
+```bash
+cd gpu && podman compose -f compose.yaml -f compose-dev.yaml up -d --build
+```
+
+It replaces nothing but the image source: ports, volume, devices and `env_file` still come
+from `compose.yaml`, and the local tag (`localhost/bonsai-server:dev-gpu`) is distinct so a
+dev build never shadows the pulled one. The Dockerfile takes `BASE_IMAGE` and
+`PRISM_FLAVOR` build args, which is how one file yields the CUDA image (`nvidia/cuda` base,
+207 MB release asset) and the CPU image (`ubuntu:24.04`, 17.8 MB asset); the cpu dev
+override sets them, gpu uses the defaults.
 
 Both declare a volume named `bonsai2-models`, but compose prefixes it with the folder name,
 so on one host they are `gpu_bonsai2-models` and `cpu_bonsai2-models` — separate 7.8 GB copies.
@@ -69,6 +80,39 @@ podman run -d --name bonsai2 \
 
 The compose stacks build locally on purpose (`image: localhost/bonsai2-server:...`). Point
 `image:` at a GHCR tag and drop the `build:` block to run the published one instead.
+
+## Web tools
+
+The model can search and read the web. `llama-server` runs tools itself and speaks MCP over
+stdio, so this is one script in the image rather than a service: `docker/mcp-web.sh` is an
+MCP server exposing `web_search` and `web_fetch`, built out of `curl` and `jq` and nothing
+else. Set `MCP_ENABLE=1` in the stack's `.env`:
+
+```bash
+MCP_ENABLE=1
+SEARXNG_URL=              # empty = DuckDuckGo lite, no key, no account
+SEARCH_RESULTS=8
+FETCH_MAX_CHARS=20000
+```
+
+The entrypoint renders `/etc/bonsai2/mcp.json.template` into a temp dir at start and passes
+`--mcp-servers-config` to `llama-server`. The tools then appear as `web_search` /
+`web_fetch` in `GET /tools`, in the built-in Web UI and to any OpenAI client that sends a
+`tools` array — llama.cpp prefixes MCP tools with the server name, so they show as
+`web_search` and `web_fetch` under the server named `web`.
+
+`web_search` returns a numbered list of titles and URLs; `web_fetch` returns a page's
+visible text with script, style and tags stripped, truncated at `FETCH_MAX_CHARS`. Point
+`SEARXNG_URL` at your own SearXNG to keep queries on your network — it needs `json` in its
+`search.formats`.
+
+Worth knowing before you turn it on:
+
+- the MCP server is a child process of `llama-server` **with the same privileges**. This one
+  only shells out to `curl`, but the mechanism is as trusted as what you declare
+- enabling tools makes llama.cpp default `--cors-origins` to localhost, which changes who
+  can reach `:8080` from a browser
+- at 1.76 bpw, tool-call formatting degrades before prose does. Test on PQ2_0, not PTQ1_0
 
 ## CI
 
@@ -109,7 +153,7 @@ PQ2_0 also wins prompt processing everywhere; PTQ1_0 wins decode on Ada/L4.
 
 ```bash
 cp .env.example .env     # pick MODEL_FILE + CTX_SIZE for your card
-podman compose up -d --build
+podman compose up -d
 podman logs -f bonsai2   # first start downloads 7.84 GB into the bonsai2-models volume
 curl localhost:8080/v1/models
 ```
@@ -117,13 +161,14 @@ curl localhost:8080/v1/models
 Plain podman, same shape as the invokeai run:
 
 ```bash
-podman build -t bonsai2-server -f docker/Dockerfile .
 podman run --rm --name bonsai2 \
   --device nvidia.com/gpu=0 --security-opt label=disable \
   -v bonsai2-models:/models -p 8080:8080 \
   -e MODEL_FILE=Ternary-Bonsai-2-27B-PQ2_0.gguf -e CTX_SIZE=32768 \
-  bonsai2-server
+  ghcr.io/onixldlc/bonsai-server:gpu
 ```
+
+Building it yourself instead: `podman build -t bonsai-server:dev -f docker/Dockerfile .`
 
 `nvidia.com/gpu=0` is the RTX 3060 and nothing else — `/etc/cdi/nvidia.yaml` lists only that card,
 so the AMD RX 9060 XT is never handed to the container. `nvidia-ctk cdi list` prints the valid names.

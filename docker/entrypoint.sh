@@ -83,6 +83,21 @@ if [ "${ENABLE_VISION}" = "1" ] && [ -n "${MMPROJ_FILE}" ]; then
     args+=(--mmproj "${MODEL_DIR}/${MMPROJ_FILE}")
 fi
 
+# Web tools. The config carries no secret, but it is still rendered from the
+# template into an ephemeral dir at start so the values come from the
+# environment rather than from a file baked into the image.
+if [ "${MCP_ENABLE:-0}" = "1" ]; then
+    mcp_dir="$(mktemp -d)"
+    mcp_config="${mcp_dir}/mcp.json"
+    sed -e "s#__SEARXNG_URL__#${SEARXNG_URL:-}#" \
+        -e "s#__SEARCH_RESULTS__#${SEARCH_RESULTS:-8}#" \
+        -e "s#__FETCH_MAX_CHARS__#${FETCH_MAX_CHARS:-20000}#" \
+        -e "s#__HTTP_TIMEOUT__#${HTTP_TIMEOUT:-20}#" \
+        /etc/bonsai2/mcp.json.template > "$mcp_config"
+    args+=(--mcp-servers-config "$mcp_config")
+    log "web tools on, search via ${SEARXNG_URL:-duckduckgo}"
+fi
+
 log "volume holds: $(ls -1A "$MODEL_DIR" | tr '\n' ' ')"
 
 if [ -n "${EXTRA_ARGS}" ]; then

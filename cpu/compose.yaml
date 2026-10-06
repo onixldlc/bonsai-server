@@ -1,14 +1,13 @@
 services:
   bonsai2:
-    image: localhost/bonsai2-server:prism-b10754-cpu
-    build:
-      # Context is the repo root so both stacks share docker/.
-      context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        # Plain ubuntu + the CPU release asset: no CUDA base, no GPU runtime.
-        BASE_IMAGE: docker.io/library/ubuntu:24.04
-        PRISM_FLAVOR: ubuntu-x64
+    # The published image. :cpu is the newest CPU-only build; pin :vX.Y.Z-cpu if
+    # you want a fixed one. https://github.com/onixldlc/bonsai-server/pkgs/container/bonsai-server
+    #
+    # To build from this checkout instead — which is what you want if you are
+    # editing docker/ — add the dev override:
+    #   podman compose -f compose.yaml -f compose-dev.yaml up -d --build
+    image: ghcr.io/onixldlc/bonsai-server:cpu
+    pull_policy: always
     container_name: bonsai2-cpu
     ports:
       - "8080:8080"

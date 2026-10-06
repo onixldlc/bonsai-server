@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
 
-RUN apt-get install -y --no-install-recommends ca-certificates curl tar libgomp1 libcurl4
+RUN apt-get install -y --no-install-recommends ca-certificates curl tar libgomp1 libcurl4 jq
 
 RUN rm -rf /var/lib/apt/lists/*
 
@@ -32,7 +32,12 @@ RUN /app/bin/llama-server --version || true
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/verify.sh /usr/local/bin/verify.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
+# MCP stdio server for web_search / web_fetch. llama-server spawns it as a
+# child process, so it ships in the image rather than as a separate service.
+COPY docker/mcp-web.sh /usr/local/bin/mcp-web
+COPY docker/mcp.json.template /etc/bonsai2/mcp.json.template
+
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh /usr/local/bin/mcp-web
 
 # The fork's tarball carries its own shared objects next to the binaries.
 ENV LD_LIBRARY_PATH=/app/bin:/usr/local/cuda/lib64
@@ -55,6 +60,15 @@ ENV HOST=0.0.0.0
 ENV PORT=8080
 ENV DOWNLOAD_ATTEMPTS=20
 ENV EXTRA_ARGS=
+# Web tools, off by default. 1 renders the MCP config and hands llama-server
+# --mcp-servers-config, exposing web_search / web_fetch to the model.
+ENV MCP_ENABLE=0
+# Empty = DuckDuckGo's lite endpoint, no key. Point at your own SearXNG to
+# keep queries on your network (its settings.yml needs `json` in search.formats).
+ENV SEARXNG_URL=
+ENV SEARCH_RESULTS=8
+ENV FETCH_MAX_CHARS=20000
+ENV HTTP_TIMEOUT=20
 
 EXPOSE 8080
 

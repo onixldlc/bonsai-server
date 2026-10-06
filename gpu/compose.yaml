@@ -1,10 +1,13 @@
 services:
   bonsai2:
-    image: localhost/bonsai2-server:prism-b10754
-    build:
-      # Context is the repo root so both stacks share docker/.
-      context: ..
-      dockerfile: docker/Dockerfile
+    # The published image. :gpu is the newest CUDA build; pin :vX.Y.Z-gpu if you
+    # want a fixed one. https://github.com/onixldlc/bonsai-server/pkgs/container/bonsai-server
+    #
+    # To build from this checkout instead — which is what you want if you are
+    # editing docker/ — add the dev override:
+    #   podman compose -f compose.yaml -f compose-dev.yaml up -d --build
+    image: ghcr.io/onixldlc/bonsai-server:gpu
+    pull_policy: always
     container_name: bonsai2
     ports:
       - "8080:8080"
